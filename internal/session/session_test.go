@@ -260,6 +260,51 @@ func must(ch <-chan Event, err error) <-chan Event {
 	return ch
 }
 
+func TestLostSnapshotTriggersOneRebuild(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	s1, bld, _ := e.m.Create(ctx, "d1", "ip1", "octo/app")
+	waitLive(t, e, s1.ID)
+	// The platform loses the golden (and, by cascade, its snapshot).
+	first, _ := e.st.GetBuild(ctx, bld.ID)
+	e.f.Delete(ctx, first.GoldenSandboxID)
+
+	s2, _, err := e.m.Create(ctx, "d2", "ip2", "octo/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch, _ := e.m.Subscribe(ctx, s2.ID)
+	var evs []Event
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		evs = append(evs, collect(t, ch, 100*time.Millisecond)...)
+		if strings.Contains(names(evs), "terminal") || strings.Contains(names(evs), "ended") {
+			break
+		}
+	}
+	got := names(evs)
+	if !strings.Contains(got, "terminal") || strings.Contains(got, "error") {
+		t.Fatalf("second visitor should go live after a rebuild, events: %s", got)
+	}
+	var sawRebuild bool
+	for _, ev := range evs {
+		if ev.Name == "log" && strings.Contains(ev.Data.(LogData).Line, "rebuilding this commit") {
+			sawRebuild = true
+		}
+	}
+	if !sawRebuild {
+		t.Error("rebuild was not announced in the log")
+	}
+	again, _ := e.st.GetBuild(ctx, bld.ID)
+	if again.Status != store.BuildReady || again.SnapshotID == first.SnapshotID || again.GoldenSandboxID == first.GoldenSandboxID {
+		t.Errorf("build not rebuilt: before=%+v after=%+v", first, again)
+	}
+	live2, _ := e.st.GetSession(ctx, s2.ID)
+	if live2.Status != store.SessionLive {
+		t.Errorf("second session = %+v", live2)
+	}
+}
+
 func TestRestoreBusyEndsSession(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()

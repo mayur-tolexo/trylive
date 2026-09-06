@@ -47,6 +47,12 @@ func (f *Fake) Create(_ context.Context, spec CreateSpec) (Sandbox, error) {
 	if f.CreateErr != nil {
 		return Sandbox{}, f.CreateErr
 	}
+	// Like the platform, a restore from an unknown snapshot is refused.
+	if spec.Restore != "" {
+		if _, ok := f.Snapshots[spec.Restore]; !ok {
+			return Sandbox{}, fmt.Errorf("create sandbox: status 400: snapshot %s not found", spec.Restore)
+		}
+	}
 	f.nextID++
 	id := fmt.Sprintf("sb-%d", f.nextID)
 	sb := Sandbox{ID: id, Name: spec.Name, Phase: PhaseReady, Region: "test", ConnectURL: "http://" + id + ".test", CreatedAt: time.Now()}
@@ -74,6 +80,11 @@ func (f *Fake) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.Sandboxes, id)
+	for sid, snap := range f.Snapshots {
+		if snap.SandboxID == id {
+			delete(f.Snapshots, sid)
+		}
+	}
 	f.Deleted = append(f.Deleted, id)
 	f.record("delete %s", id)
 	return nil

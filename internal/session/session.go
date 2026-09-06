@@ -148,7 +148,7 @@ func (m *Manager) Create(ctx context.Context, device, ip, repoRef string) (store
 	m.mu.Lock()
 	m.live[s.ID] = l
 	m.mu.Unlock()
-	go m.run(s, bld, l)
+	go m.run(s, bld, info, l)
 	return s, bld, nil
 }
 
@@ -192,7 +192,7 @@ func (m *Manager) Subscribe(ctx context.Context, id string) (<-chan Event, error
 }
 
 // run drives one session from build to expiry.
-func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
+func (m *Manager) run(s store.Session, bld store.Build, info repo.Info, l *fanout.Log[Event]) {
 	ctx := context.Background()
 	end := func(reason string) {
 		// terminate() may have ended the session already; keep its reason.
@@ -212,38 +212,9 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 	}
 
 	// Follow the build until it settles, forwarding its log.
-	if bld.Status != store.BuildReady {
-		l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: "working out how to run this repo"}})
-		events, err := m.Builder.Subscribe(ctx, bld.ID)
-		if err != nil {
-			l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: err.Error()}})
-			end("build unavailable")
-			return
-		}
-		for ev := range events {
-			switch ev.Type {
-			case "log":
-				l.Emit(Event{Name: "log", Data: LogData{TS: ev.TS.Format(time.RFC3339Nano), Phase: ev.Phase, Line: ev.Line}})
-			case "status":
-				bld = ev.Build
-				l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: phaseMessage(bld.Status)}})
-			}
-		}
-		// The stream closes when the build ends; read the final record.
-		if fresh, err := m.Store.GetBuild(ctx, bld.ID); err == nil {
-			bld = fresh
-		}
-		switch bld.Status {
-		case store.BuildReady:
-		case store.BuildUnsupported:
-			l.Emit(Event{Name: "error", Data: ErrorData{Code: "unsupported", Message: bld.Error}})
-			end("unsupported")
-			return
-		default:
-			l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: bld.Error}})
-			end("build failed")
-			return
-		}
+	var ok bool
+	if bld, ok = m.follow(ctx, bld, s, l, end); !ok {
+		return
 	}
 
 	// A visitor joining an already-built commit still gets the build's story:
@@ -260,26 +231,48 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 
 	// Visitor sandbox: restored from the snapshot, no egress, reclaimed by the
 	// platform on idle or lifetime so a forgotten tab costs nothing for long.
-	sb, err := m.Sandbox.Create(ctx, sandbox.CreateSpec{
-		Name:      "tlv-" + s.ID[:8],
-		Restore:   bld.SnapshotID,
-		Resources: &builder.Size,
-		Egress:    sandbox.Egress{Mode: "deny_all"},
-		Lifecycle: sandbox.Lifecycle{IdleTimeoutSeconds: int(m.Limits.TTL.Seconds()), MaxLifetimeSeconds: int(m.Limits.MaxTTL.Seconds()), OnIdle: "delete"},
-	})
-	if err != nil {
-		code := "infra_error"
-		if errors.Is(err, sandbox.ErrBusy) {
-			code = "busy"
+	// If the snapshot is gone (its golden was reclaimed), the commit is rebuilt
+	// once and this visitor follows the new build instead of failing.
+	var sb sandbox.Sandbox
+	rebuilt := false
+	for {
+		var err error
+		sb, err = m.Sandbox.Create(ctx, sandbox.CreateSpec{
+			Name:      "tlv-" + s.ID[:8],
+			Restore:   bld.SnapshotID,
+			Resources: &builder.Size,
+			Egress:    sandbox.Egress{Mode: "deny_all"},
+			Lifecycle: sandbox.Lifecycle{IdleTimeoutSeconds: int(m.Limits.TTL.Seconds()), MaxLifetimeSeconds: int(m.Limits.MaxTTL.Seconds()), OnIdle: "delete"},
+		})
+		if err == nil {
+			break
 		}
 		m.Log.Error("restore sandbox", "session", s.ID, "build", bld.ID, "snapshot", bld.SnapshotID, "err", err)
-		l.Emit(Event{Name: "error", Data: ErrorData{Code: code, Message: "could not start a sandbox: " + err.Error()}})
-		end("could not start a sandbox")
-		return
+		if errors.Is(err, sandbox.ErrBusy) {
+			l.Emit(Event{Name: "error", Data: ErrorData{Code: "busy", Message: "every sandbox is in use right now"}})
+			end("no capacity")
+			return
+		}
+		if rebuilt {
+			l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: "could not start a sandbox: " + err.Error()}})
+			end("could not start a sandbox")
+			return
+		}
+		rebuilt = true
+		l.Emit(Event{Name: "log", Data: LogData{TS: m.Now().Format(time.RFC3339Nano), Phase: "restore", Line: "the saved snapshot is no longer available; rebuilding this commit"}})
+		if bld, err = m.rebuild(ctx, bld, info); err != nil {
+			l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: err.Error()}})
+			end("rebuild failed")
+			return
+		}
+		if bld, ok = m.follow(ctx, bld, s, l, end); !ok {
+			return
+		}
 	}
 	s.SandboxID = sb.ID
 	m.Store.UpdateSession(ctx, &s)
-	if sb, err = m.Sandbox.WaitReady(ctx, sb.ID, 2*time.Minute); err != nil {
+	sb, err := m.Sandbox.WaitReady(ctx, sb.ID, 2*time.Minute)
+	if err != nil {
 		m.Sandbox.Delete(ctx, sb.ID)
 		l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: err.Error()}})
 		end("sandbox failed to start")
@@ -326,6 +319,60 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 			return
 		}
 	}
+}
+
+// follow streams an unfinished build into the session until it settles and
+// reports whether the visitor can proceed to a restore; on failure it has
+// already ended the session.
+func (m *Manager) follow(ctx context.Context, bld store.Build, s store.Session, l *fanout.Log[Event], end func(string)) (store.Build, bool) {
+	if bld.Status == store.BuildReady {
+		return bld, true
+	}
+	l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: "working out how to run this repo"}})
+	events, err := m.Builder.Subscribe(ctx, bld.ID)
+	if err != nil {
+		l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: err.Error()}})
+		end("build unavailable")
+		return bld, false
+	}
+	for ev := range events {
+		switch ev.Type {
+		case "log":
+			l.Emit(Event{Name: "log", Data: LogData{TS: ev.TS.Format(time.RFC3339Nano), Phase: ev.Phase, Line: ev.Line}})
+		case "status":
+			bld = ev.Build
+			l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: phaseMessage(bld.Status)}})
+		}
+	}
+	// The stream closes when the build ends; read the final record.
+	if fresh, err := m.Store.GetBuild(ctx, bld.ID); err == nil {
+		bld = fresh
+	}
+	switch bld.Status {
+	case store.BuildReady:
+		return bld, true
+	case store.BuildUnsupported:
+		l.Emit(Event{Name: "error", Data: ErrorData{Code: "unsupported", Message: bld.Error}})
+		end("unsupported")
+	default:
+		l.Emit(Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: bld.Error}})
+		end("build failed")
+	}
+	return bld, false
+}
+
+// rebuild queues the commit again after its snapshot was lost and returns the
+// restarted build. The golden that owned the snapshot is deleted if it still
+// exists, since it is of no further use.
+func (m *Manager) rebuild(ctx context.Context, bld store.Build, info repo.Info) (store.Build, error) {
+	if bld.GoldenSandboxID != "" {
+		m.Sandbox.Delete(ctx, bld.GoldenSandboxID)
+	}
+	bld.Status, bld.SnapshotID, bld.GoldenSandboxID, bld.Error = store.BuildQueued, "", "", ""
+	if err := m.Store.UpdateBuild(ctx, &bld); err != nil {
+		return bld, err
+	}
+	return m.Builder.Ensure(ctx, info)
 }
 
 // replayLog turns a build's stored log back into log events.
