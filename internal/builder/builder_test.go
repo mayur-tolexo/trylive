@@ -179,6 +179,18 @@ func TestProbeWaitsForTheRealPortAfterAHelperPort(t *testing.T) {
 	}
 }
 
+func TestMissingToolchainIsUnsupported(t *testing.T) {
+	b, f, st := newEnv(t)
+	f.ExecScript["python3 inspect.py"] = sandbox.ExecResult{Stdout: manifestJSON(recipe.Manifest{GoMod: "module x", Files: []string{"main.go"}})}
+	f.ExecScript["sh -c command -v go"] = sandbox.ExecResult{ExitCode: 1}
+	bld, _ := b.Ensure(context.Background(), info)
+	done := waitDone(t, b, st, bld.ID)
+	if done.Status != store.BuildUnsupported || !strings.Contains(done.Error, "go is not available") {
+		t.Fatalf("build = %+v", done)
+	}
+	waitDeleted(t, f, 1)
+}
+
 func TestBuildUnsupportedDeletesSandbox(t *testing.T) {
 	b, f, st := newEnv(t)
 	f.ExecScript["python3 inspect.py"] = sandbox.ExecResult{Stdout: manifestJSON(recipe.Manifest{Files: []string{"LICENSE"}})}

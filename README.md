@@ -28,6 +28,10 @@ to fix it. Every command a recipe runs must start with an allow-listed
 program and contain no shell operators. If nothing ends up listening, the
 visitor gets a terminal in the installed repo instead of a preview.
 
+The sandbox image has git, Node 24 (npm, yarn), Python 3.14 (pip) and make.
+Repos that need another toolchain (Go, Rust, Ruby, PHP, Docker) are reported
+as unsupported for now rather than failing mid-install.
+
 Maintainers can skip detection entirely with a `trylive.yaml` at the repo
 root:
 

@@ -305,12 +305,23 @@ func (b *Builder) execute(r *run, info repo.Info) {
 	r.mu.Unlock()
 
 	lg.phase = "install"
+	// A toolchain the image lacks is a clear "not yet", not a failed build.
+	if missing := b.missingTools(ctx, sb, rcp.Install); missing != "" {
+		fail(store.BuildUnsupported, "install", fmt.Errorf("%s is not available in the sandbox image yet (it has Node and Python)", missing))
+		return
+	}
 	if err := b.install(ctx, sb, &rcp, manifest, lg); err != nil {
 		fail(store.BuildFailed, "install", err)
 		return
 	}
 
 	lg.phase = "start"
+	if rcp.Start != "" {
+		if missing := b.missingTools(ctx, sb, []string{rcp.Start}); missing != "" {
+			fail(store.BuildUnsupported, "start", fmt.Errorf("%s is not available in the sandbox image yet (it has Node and Python)", missing))
+			return
+		}
+	}
 	kind, port, err := b.startAndProbe(ctx, sb, rcp, lg)
 	if err != nil {
 		fail(store.BuildFailed, "start", err)
@@ -355,6 +366,23 @@ func (b *Builder) execute(r *run, info repo.Info) {
 	b.mu.Lock()
 	delete(b.runs, r.build.ID)
 	b.mu.Unlock()
+}
+
+// missingTools returns the first command program that is not on the sandbox
+// PATH, or "" when all are present. Programs installed by an earlier command
+// (pip-provided servers) are checked only when their command is about to run.
+func (b *Builder) missingTools(ctx context.Context, sb sandbox.Sandbox, cmds []string) string {
+	for _, c := range cmds {
+		_, prog, _ := recipe.Split(c)
+		if prog == "" {
+			continue
+		}
+		res, err := b.Sandbox.Exec(ctx, sb, sandbox.ExecSpec{Command: "sh", Args: []string{"-c", "command -v " + prog}, TimeoutMS: 5000}, nil)
+		if err == nil && res.ExitCode != 0 {
+			return prog
+		}
+	}
+	return ""
 }
 
 // inspect writes the inspector into the sandbox and parses its manifest.

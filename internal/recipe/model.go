@@ -68,9 +68,9 @@ func Repair(ctx context.Context, llm LLM, m Manifest, r Recipe, failed string, l
 	return cmds, nil
 }
 
-const inferSystem = `You decide how to install and run a GitHub repository inside a Linux sandbox that has Node 20, Python 3, Go, Rust and make installed, with the repository cloned into the current directory. Reply with ONE JSON object and nothing else:
+const inferSystem = `You decide how to install and run a GitHub repository inside a Linux sandbox that has git, Node 24 with npm and yarn, Python 3.14 with pip, and make installed (no Go, Rust, Ruby, PHP, Docker or apt), with the repository cloned into the current directory. Reply with ONE JSON object and nothing else:
 {"kind":"web"|"terminal","cwd":"","install":["..."],"start":"...","port":3000,"env":{"KEY":"VALUE"}}
-Rules: commands are single programs with arguments, no shell operators (no |, &&, ;, >, $(...)), no sudo, curl or wget. Allowed programs: npm npx pnpm yarn bun node deno pip pip3 python3 poetry uv go cargo make bundle ruby streamlit uvicorn gunicorn flask hugo jekyll mkdocs php composer dotnet. Servers must bind 0.0.0.0 (pass --host 0.0.0.0 or set HOST/PORT env). kind is "web" only if start launches a server on port; otherwise "terminal" with start omitted. Prefer the repository's own documented commands from the README.`
+Rules: commands are single programs with arguments, no shell operators (no |, &&, ;, >, $(...)), no sudo, curl or wget. Allowed programs: npm npx pnpm yarn bun node pip pip3 python3 poetry uv make streamlit uvicorn gunicorn flask mkdocs. Servers must bind 0.0.0.0 (pass --host 0.0.0.0 or set HOST/PORT env). kind is "web" only if start launches a server on port; otherwise "terminal" with start omitted. Prefer the repository's own documented commands from the README.`
 
 const repairSystem = `You fix a failing install step for a repository inside a Linux sandbox. Same command rules: single programs with arguments, no shell operators, no sudo/curl/wget, allowed programs only. Reply with ONLY a JSON array of strings.`
 
