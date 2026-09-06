@@ -161,6 +161,17 @@ func TestSecondVisitorReusesReadyBuild(t *testing.T) {
 	if e.f.SnapshotCount() != before {
 		t.Error("a second snapshot was taken for the same commit")
 	}
+	// The second visitor still sees the build log, replayed from the store.
+	ch, _ := e.m.Subscribe(ctx, s2.ID)
+	var logs int
+	for _, ev := range collect(t, ch, 500*time.Millisecond) {
+		if ev.Name == "log" && strings.Contains(ev.Data.(LogData).Line, "git clone") && ev.Data.(LogData).Phase == "clone" {
+			logs++
+		}
+	}
+	if logs != 1 {
+		t.Errorf("replayed clone log lines = %d", logs)
+	}
 }
 
 func waitLive(t *testing.T, e *env, id string) store.Session {

@@ -152,6 +152,30 @@ func TestBuildTerminalWhenNothingListens(t *testing.T) {
 	}
 }
 
+func TestProbeWaitsForTheRealPortAfterAHelperPort(t *testing.T) {
+	b, f, st := newEnv(t)
+	// First probe sees only a helper port; the page server appears on the next.
+	probes := 0
+	f.ExecHook = func(spec sandbox.ExecSpec, _ int) (sandbox.ExecResult, bool) {
+		if spec.Command != "sh" {
+			return sandbox.ExecResult{}, false
+		}
+		probes++
+		if probes == 1 {
+			return sandbox.ExecResult{Stdout: "LISTEN 0 5 0.0.0.0:9999 0.0.0.0:*\nLISTEN 0 5 0.0.0.0:35729 0.0.0.0:*\n"}, true
+		}
+		return sandbox.ExecResult{Stdout: "LISTEN 0 5 0.0.0.0:9999 0.0.0.0:*\nLISTEN 0 5 0.0.0.0:8080 0.0.0.0:*\n"}, true
+	}
+	b.ProbeTimeout = 2 * time.Second
+	bld, _ := b.Ensure(context.Background(), info)
+	done := waitDone(t, b, st, bld.ID)
+	// Hint 5173 never appears: after settling, the lowest real port wins and
+	// livereload is ignored.
+	if done.Status != store.BuildReady || done.Port != 8080 {
+		t.Fatalf("build = %+v", done)
+	}
+}
+
 func TestBuildUnsupportedDeletesSandbox(t *testing.T) {
 	b, f, st := newEnv(t)
 	f.ExecScript["python3 inspect.py"] = sandbox.ExecResult{Stdout: manifestJSON(recipe.Manifest{Files: []string{"LICENSE"}})}

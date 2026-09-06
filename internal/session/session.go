@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -215,6 +216,18 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 		}
 	}
 
+	// A visitor joining an already-built commit still gets the build's story:
+	// replay the stored log so "how we ran it" is never empty.
+	if len(l.Events()) <= 1 {
+		for _, line := range strings.Split(strings.TrimRight(bld.Log, "\n"), "\n") {
+			if line == "" {
+				continue
+			}
+			phase, text := splitPhase(line)
+			l.Emit(Event{Name: "log", Data: LogData{TS: bld.UpdatedAt.Format(time.RFC3339Nano), Phase: phase, Line: text}})
+		}
+	}
+
 	s.Status = store.SessionStarting
 	m.Store.UpdateSession(ctx, &s)
 	l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: "restoring your sandbox"}})
@@ -286,6 +299,16 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 			return
 		}
 	}
+}
+
+// splitPhase separates the "[phase] " prefix the builder stores on each line.
+func splitPhase(line string) (string, string) {
+	if strings.HasPrefix(line, "[") {
+		if i := strings.Index(line, "] "); i > 0 {
+			return line[1:i], line[i+2:]
+		}
+	}
+	return "", line
 }
 
 // phaseMessage is the human line for a build status.

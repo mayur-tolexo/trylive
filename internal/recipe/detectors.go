@@ -139,7 +139,9 @@ var pyFrameworks = []pyFramework{
 		return "streamlit run " + e + " --server.address 0.0.0.0 --server.port 8501 --server.headless true"
 	}, nil},
 	{"gradio", 7860, func(e string) string { return "python3 " + e }, map[string]string{"GRADIO_SERVER_NAME": "0.0.0.0", "GRADIO_SERVER_PORT": "7860"}},
-	{"django", 8000, func(e string) string { return "python3 manage.py runserver 0.0.0.0:8000" }, nil},
+	// The preview host is unknown to the project; these are the env names the
+	// common Django templates read for ALLOWED_HOSTS.
+	{"django", 8000, func(e string) string { return "python3 manage.py runserver 0.0.0.0:8000" }, map[string]string{"ALLOWED_HOSTS": "*", "DJANGO_ALLOWED_HOSTS": "*"}},
 	{"fastapi", 8000, func(e string) string { return "uvicorn " + module(e) + ":app --host 0.0.0.0 --port 8000" }, nil},
 	{"flask", 5000, func(e string) string { return "flask --app " + module(e) + " run --host 0.0.0.0 --port 5000" }, nil},
 }

@@ -435,13 +435,20 @@ func (b *Builder) startAndProbe(ctx context.Context, sb sandbox.Sandbox, rcp rec
 	go b.Sandbox.StreamLogs(logCtx, sb, proc.ID, func(c sandbox.LogChunk) { appLog.Write(c.Data) })
 
 	deadline := time.Now().Add(b.ProbeTimeout)
+	settle := false
 	for {
 		res, err := b.Sandbox.Exec(ctx, sb, sandbox.ExecSpec{Command: "sh", Args: []string{"-c", "ss -ltnH 2>/dev/null || cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"}, TimeoutMS: 5000}, nil)
 		if err != nil {
 			return "", 0, err
 		}
-		if port := ChoosePort(rcp.Port, ParseListening(res.Stdout)); port > 0 {
-			return recipe.KindWeb, port, nil
+		listening := ParseListening(res.Stdout)
+		if port := ChoosePort(rcp.Port, listening); port > 0 {
+			// Dev servers often open helper ports before the page server; unless the
+			// hinted port is already up, look once more before committing.
+			if port == rcp.Port || settle {
+				return recipe.KindWeb, port, nil
+			}
+			settle = true
 		}
 		if time.Now().After(deadline) {
 			// The recipe promised a server that never listened; treat the repo as

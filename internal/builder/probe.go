@@ -6,8 +6,9 @@ import (
 	"strings"
 )
 
-// reservedPorts are never treated as the app: sandboxd and ssh.
-var reservedPorts = map[int]bool{44772: true, 22: true}
+// reservedPorts are never treated as the app: sandboxd, ssh, and livereload,
+// which many dev servers open before the page server itself.
+var reservedPorts = map[int]bool{44772: true, 22: true, 35729: true}
 
 // ParseListening extracts listening TCP ports from `ss -ltnH` output, falling
 // back to /proc/net/tcp format (hex address:port with state 0A) when ss is
