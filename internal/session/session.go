@@ -167,6 +167,19 @@ func (m *Manager) Subscribe(ctx context.Context, id string) (<-chan Event, error
 		}
 		go func() {
 			defer close(ch)
+			// An ended session still has a story: replay the build's stored log
+			// (and its outcome) before saying it is over.
+			if bld, err := m.Store.GetBuild(ctx, s.BuildID); err == nil {
+				for _, ev := range replayLog(bld) {
+					ch <- ev
+				}
+				switch bld.Status {
+				case store.BuildUnsupported:
+					ch <- Event{Name: "error", Data: ErrorData{Code: "unsupported", Message: bld.Error}}
+				case store.BuildFailed:
+					ch <- Event{Name: "error", Data: ErrorData{Code: "infra_error", Message: bld.Error}}
+				}
+			}
 			reason := s.EndedReason
 			if reason == "" {
 				reason = "server restarted"
@@ -236,12 +249,8 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 	// A visitor joining an already-built commit still gets the build's story:
 	// replay the stored log so "how we ran it" is never empty.
 	if len(l.Events()) <= 1 {
-		for _, line := range strings.Split(strings.TrimRight(bld.Log, "\n"), "\n") {
-			if line == "" {
-				continue
-			}
-			phase, text := splitPhase(line)
-			l.Emit(Event{Name: "log", Data: LogData{TS: bld.UpdatedAt.Format(time.RFC3339Nano), Phase: phase, Line: text}})
+		for _, ev := range replayLog(bld) {
+			l.Emit(ev)
 		}
 	}
 
@@ -316,6 +325,19 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 			return
 		}
 	}
+}
+
+// replayLog turns a build's stored log back into log events.
+func replayLog(bld store.Build) []Event {
+	var out []Event
+	for _, line := range strings.Split(strings.TrimRight(bld.Log, "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		phase, text := splitPhase(line)
+		out = append(out, Event{Name: "log", Data: LogData{TS: bld.UpdatedAt.Format(time.RFC3339Nano), Phase: phase, Line: text}})
+	}
+	return out
 }
 
 // splitPhase separates the "[phase] " prefix the builder stores on each line.

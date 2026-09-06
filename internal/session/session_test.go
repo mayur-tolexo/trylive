@@ -140,10 +140,10 @@ func TestSessionBuildsThenGoesLive(t *testing.T) {
 	if final.Status != store.SessionEnded || final.EndedReason != "session expired" {
 		t.Errorf("final = %+v", final)
 	}
-	// A late subscriber to an ended session gets one ended event.
+	// A late subscriber to an ended session gets the build log, then ended.
 	late, _ := e.m.Subscribe(ctx, s.ID)
-	if evs := collect(t, late, time.Second); len(evs) != 1 || evs[0].Name != "ended" {
-		t.Errorf("late subscribe = %s", names(evs))
+	if got := names(collect(t, late, time.Second)); !strings.HasPrefix(got, "log ") || !strings.HasSuffix(got, " ended") {
+		t.Errorf("late subscribe = %s", got)
 	}
 }
 
@@ -245,6 +245,19 @@ func TestUnsupportedBuildEndsSession(t *testing.T) {
 	if _, err := e.m.PTY(ctx, s.ID, 80, 24); !errors.Is(err, ErrNotLive) {
 		t.Errorf("pty on ended session err = %v", err)
 	}
+	// Reloading an ended session replays the build log and outcome, then ends.
+	again := names(collect(t, must(e.m.Subscribe(ctx, s.ID)), time.Second))
+	if !strings.HasPrefix(again, "log ") || !strings.Contains(again, " error ") || !strings.HasSuffix(again, "ended") {
+		t.Errorf("ended replay = %s", again)
+	}
+}
+
+// must unwraps a channel-returning call in tests.
+func must(ch <-chan Event, err error) <-chan Event {
+	if err != nil {
+		panic(err)
+	}
+	return ch
 }
 
 func TestRestoreBusyEndsSession(t *testing.T) {
