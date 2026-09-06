@@ -115,6 +115,9 @@ func TestBuildHappyPath(t *testing.T) {
 		t.Errorf("stored log = %q", done.Log)
 	}
 	calls := strings.Join(f.CallLog(), "\n")
+	if !strings.Contains(calls, "create tl-octo-app-0123456-"+bld.ID[:6]+" ") {
+		t.Errorf("golden name must include the build id:\n%s", calls)
+	}
 	if !strings.Contains(calls, "egress=allow_list/true") || !strings.Contains(calls, "on_idle=pause") {
 		t.Errorf("build sandbox spec wrong:\n%s", calls)
 	}

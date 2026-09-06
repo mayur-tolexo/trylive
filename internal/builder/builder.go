@@ -241,8 +241,10 @@ func (b *Builder) execute(r *run, info repo.Info) {
 	// because it must outlive the build as the snapshot's owner.
 	lg.phase = "sandbox"
 	lg.line("creating build sandbox")
+	// The name carries the build id: a rebuild of the same commit (after a
+	// store reset, or a forced rebuild) must not collide with an older golden.
 	sb, err := b.Sandbox.Create(ctx, sandbox.CreateSpec{
-		Name:      "tl-" + shortName(info) + "-" + info.SHA[:7],
+		Name:      "tl-" + shortName(info) + "-" + info.SHA[:7] + "-" + r.build.ID[:6],
 		Resources: &Size,
 		Egress:    sandbox.Egress{Mode: "allow_list", AllowInternet: true},
 		Lifecycle: sandbox.Lifecycle{IdleTimeoutSeconds: int(buildTimeout.Seconds()), OnIdle: "pause"},
@@ -323,7 +325,7 @@ func (b *Builder) execute(r *run, info repo.Info) {
 
 	lg.phase = "snapshot"
 	lg.line("snapshotting the running sandbox")
-	snap, err := b.Sandbox.CreateSnapshot(ctx, sb.ID, "tl-"+shortName(info)+"-"+info.SHA[:7])
+	snap, err := b.Sandbox.CreateSnapshot(ctx, sb.ID, "tl-"+shortName(info)+"-"+info.SHA[:7]+"-"+r.build.ID[:6])
 	if err != nil {
 		fail(store.BuildFailed, "snapshot", err)
 		return
@@ -481,8 +483,9 @@ func shortName(info repo.Info) string {
 		}
 	}
 	name := strings.Trim(string(out), "-")
-	if len(name) > 40 {
-		name = name[:40]
+	// Leave room for "tl-", the sha, and the build id within the 63-char limit.
+	if len(name) > 36 {
+		name = name[:36]
 	}
 	return strings.Trim(name, "-")
 }
