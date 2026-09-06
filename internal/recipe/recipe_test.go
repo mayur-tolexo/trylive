@@ -81,8 +81,11 @@ func TestDetectPython(t *testing.T) {
 }
 
 func TestDetectOthers(t *testing.T) {
-	if r, _ := Detect(Manifest{GoMod: "module x\n"}); r.Detector != "go.mod" || r.Start != "go run ." || r.Port != 8080 {
+	if r, _ := Detect(Manifest{GoMod: "module x\n", Files: []string{"main.go", "go.mod"}}); r.Detector != "go.mod" || r.Start != "go run ." || r.Port != 8080 {
 		t.Errorf("go = %+v", r)
+	}
+	if r, _ := Detect(Manifest{GoMod: "module x\n", Files: []string{"cmd", "internal", "go.mod"}, CmdDirs: []string{"server", "tool"}}); r.Start != "go run ./cmd/server" {
+		t.Errorf("go cmd = %+v", r)
 	}
 	if r, _ := Detect(Manifest{CargoToml: "[package]"}); r.Detector != "Cargo.toml" || r.Start != "cargo run" {
 		t.Errorf("cargo = %+v", r)

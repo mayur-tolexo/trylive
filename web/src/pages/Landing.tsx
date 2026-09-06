@@ -63,7 +63,8 @@ export function Landing() {
           )
           break
         case 'busy':
-          setError('The queue is still full. Please try again in a minute.')
+          // The server says why (sandbox capacity vs. GitHub lookups); prefer it.
+          setError(err.message ? `${err.message}.` : 'The queue is still full. Please try again in a minute.')
           break
         case 'invalid':
         case 'not_found':

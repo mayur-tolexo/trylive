@@ -24,8 +24,11 @@ def main():
     except OSError:
         names = []
     files = [n for n in names if not n.startswith(".git")]
+    cmd_dir = os.path.join(root, "cmd")
+    cmd_dirs = sorted(d for d in os.listdir(cmd_dir) if os.path.isdir(os.path.join(cmd_dir, d))) if os.path.isdir(cmd_dir) else []
     m = {
         "files": files,
+        "cmd_dirs": cmd_dirs,
         "lockfiles": [n for n in files if n in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "poetry.lock", "uv.lock", "Pipfile.lock")],
         "make_targets": [],
         "has_index_html": "index.html" in files,

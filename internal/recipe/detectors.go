@@ -210,13 +210,27 @@ func pyEntry(m Manifest, dep string) string {
 // module turns app.py into app for uvicorn/flask.
 func module(entry string) string { return strings.TrimSuffix(entry, ".py") }
 
-// detectGo runs the module's main package; the probe decides whether a port
-// appears.
+// detectGo runs the main package: the module root when it has Go files,
+// otherwise the first cmd/<name>. The probe decides whether a port appears.
 func detectGo(m Manifest) (Recipe, bool) {
 	if strings.TrimSpace(m.GoMod) == "" {
 		return Recipe{}, false
 	}
-	return Recipe{Kind: KindWeb, Install: []string{"go mod download"}, Start: "go run .", Port: 8080, Env: map[string]string{"PORT": "8080", "HOST": "0.0.0.0"}}, true
+	target := "."
+	if !hasGoFile(m.Files) && len(m.CmdDirs) > 0 {
+		target = "./cmd/" + m.CmdDirs[0]
+	}
+	return Recipe{Kind: KindWeb, Install: []string{"go mod download"}, Start: "go run " + target, Port: 8080, Env: map[string]string{"PORT": "8080", "HOST": "0.0.0.0", "ADDR": ":8080"}}, true
+}
+
+// hasGoFile reports whether any top-level entry is a Go source file.
+func hasGoFile(files []string) bool {
+	for _, f := range files {
+		if strings.HasSuffix(f, ".go") && !strings.HasSuffix(f, "_test.go") {
+			return true
+		}
+	}
+	return false
 }
 
 func detectCargo(m Manifest) (Recipe, bool) {

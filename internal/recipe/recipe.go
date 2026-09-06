@@ -31,7 +31,8 @@ type Recipe struct {
 // Manifest is what the inspector reports about a cloned repository: which
 // well-known files exist and the contents of the small ones detectors read.
 type Manifest struct {
-	Files        []string     `json:"files"` // top-level entries
+	Files        []string     `json:"files"`    // top-level entries
+	CmdDirs      []string     `json:"cmd_dirs"` // subdirectories of cmd/, for Go main packages
 	PackageJSON  *PackageJSON `json:"package_json,omitempty"`
 	Lockfiles    []string     `json:"lockfiles"`
 	PyProject    string       `json:"pyproject,omitempty"`
