@@ -198,7 +198,8 @@ export function Session() {
             </>
           )}
 
-          {ended && (
+          {/* A failed or unsupported build already explains itself in its card; the overlay would only dim it. */}
+          {ended && !buildFailed && !buildUnsupported && (
             <div className="overlay">
               <div className="card overlay-card">
                 <h2 className="h-serif">Session ended{state.endedReason ? ` (${state.endedReason})` : ''}</h2>
