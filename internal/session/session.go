@@ -272,8 +272,9 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 		if errors.Is(err, sandbox.ErrBusy) {
 			code = "busy"
 		}
+		m.Log.Error("restore sandbox", "session", s.ID, "build", bld.ID, "snapshot", bld.SnapshotID, "err", err)
 		l.Emit(Event{Name: "error", Data: ErrorData{Code: code, Message: "could not start a sandbox: " + err.Error()}})
-		end("no capacity")
+		end("could not start a sandbox")
 		return
 	}
 	s.SandboxID = sb.ID
