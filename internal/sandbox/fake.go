@@ -97,10 +97,16 @@ func (f *Fake) Keepalive(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *Fake) UpdateTimeout(_ context.Context, id string, lc Lifecycle) error {
+func (f *Fake) Pause(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.record("timeout %s idle=%d on_idle=%s", id, lc.IdleTimeoutSeconds, lc.OnIdle)
+	sb, ok := f.Sandboxes[id]
+	if !ok {
+		return ErrNotFound
+	}
+	sb.Phase = PhasePaused
+	f.Sandboxes[id] = sb
+	f.record("pause %s", id)
 	return nil
 }
 

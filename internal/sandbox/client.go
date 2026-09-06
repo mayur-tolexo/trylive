@@ -117,7 +117,9 @@ type Client interface {
 	Delete(ctx context.Context, id string) error
 	ExposePort(ctx context.Context, id string, port int) (previewURL string, err error)
 	Keepalive(ctx context.Context, id string) error
-	UpdateTimeout(ctx context.Context, id string, lc Lifecycle) error
+	// Pause stops the sandbox's runtime while preserving its state and any
+	// snapshots it owns.
+	Pause(ctx context.Context, id string) error
 	CreateSnapshot(ctx context.Context, id, name string) (Snapshot, error)
 	GetSnapshot(ctx context.Context, snapshotID string) (Snapshot, error)
 	// WaitSnapshot polls GetSnapshot until Ready or Failed.

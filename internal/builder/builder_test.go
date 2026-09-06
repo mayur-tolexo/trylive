@@ -121,8 +121,8 @@ func TestBuildHappyPath(t *testing.T) {
 	if !strings.Contains(calls, "exec npm install --no-audit --no-fund cwd=repo") || !strings.Contains(calls, "start npm run dev -- --host 0.0.0.0 --port 5173 cwd=repo") {
 		t.Errorf("commands not run in repo dir:\n%s", calls)
 	}
-	if !strings.Contains(calls, "timeout sb-1 idle=120 on_idle=pause") {
-		t.Errorf("golden not set to pause:\n%s", calls)
+	if !strings.Contains(calls, "pause sb-1") {
+		t.Errorf("golden not paused:\n%s", calls)
 	}
 	if d := f.DeletedIDs(); len(d) != 0 {
 		t.Errorf("golden must not be deleted, deleted=%v", d)

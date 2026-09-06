@@ -150,13 +150,13 @@ func (c *HTTP) Keepalive(ctx context.Context, id string) error {
 	return nil
 }
 
-func (c *HTTP) UpdateTimeout(ctx context.Context, id string, lc Lifecycle) error {
-	status, err := c.control(ctx, http.MethodPut, c.path("sandboxes", id, "timeout"), lc, nil)
+func (c *HTTP) Pause(ctx context.Context, id string) error {
+	status, err := c.control(ctx, http.MethodPost, c.path("sandboxes", id, "pause"), nil, nil)
 	if err != nil {
 		return err
 	}
-	if status != http.StatusOK {
-		return fmt.Errorf("update timeout %s: status %d", id, status)
+	if status != http.StatusOK && status != http.StatusAccepted && status != http.StatusNoContent {
+		return fmt.Errorf("pause %s: status %d", id, status)
 	}
 	return nil
 }

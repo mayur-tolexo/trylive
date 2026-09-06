@@ -34,9 +34,6 @@ const (
 	probeTimeout    = 90 * time.Second
 	snapshotTimeout = 5 * time.Minute
 	buildTimeout    = 20 * time.Minute
-	// goldenIdle is how long the golden stays running after the build before the
-	// platform pauses it; short, so it stops costing compute quickly.
-	goldenIdle = 120
 )
 
 // repoDir is where the clone lives inside the sandbox workspace.
@@ -337,10 +334,10 @@ func (b *Builder) execute(r *run, info repo.Info) {
 	}
 	lg.line("snapshot %s ready (%d MB)", snap.ID, snap.SizeBytes>>20)
 
-	// The golden pauses itself shortly after the build; it is never deleted
-	// while its snapshot is wanted.
-	if err := b.Sandbox.UpdateTimeout(ctx, sb.ID, sandbox.Lifecycle{IdleTimeoutSeconds: goldenIdle, OnIdle: "pause"}); err != nil {
-		b.Log.Warn("golden timeout", "id", sb.ID, "err", err)
+	// Pause the golden now: it costs nothing paused and is never deleted while
+	// its snapshot is wanted. A failed pause is logged, not fatal.
+	if err := b.Sandbox.Pause(ctx, sb.ID); err != nil {
+		b.Log.Warn("pause golden", "id", sb.ID, "err", err)
 	}
 	keep = true
 

@@ -262,12 +262,11 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 	l.Emit(Event{Name: "ttl", Data: TTLData{ExpiresAt: exp, Extended: false}})
 	l.Emit(Event{Name: "phase", Data: PhaseData{BuildStatus: bld.Status, SessionStatus: s.Status, Message: "live"}})
 
-	// Watch until the platform reclaims the sandbox or the hard cap passes.
-	hard := s.CreatedAt.Add(m.Limits.MaxTTL + time.Minute)
+	// Watch until the platform reclaims the sandbox or our own expiry passes.
+	// The expiry is enforced here as well as by the platform lifecycle so a
+	// session never outlives its promise if the platform's idle reaper lags.
 	for {
-		select {
-		case <-time.After(m.Poll):
-		}
+		<-time.After(m.Poll)
 		cur, err := m.Sandbox.Get(ctx, sb.ID)
 		switch {
 		case errors.Is(err, sandbox.ErrNotFound):
@@ -277,7 +276,11 @@ func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 			end("sandbox stopped")
 			return
 		}
-		if m.Now().After(hard) {
+		// Extend moves ExpiresAt in the store; re-read it rather than trust our copy.
+		if fresh, err := m.Store.GetSession(ctx, s.ID); err == nil {
+			s = fresh
+		}
+		if s.ExpiresAt != nil && m.Now().After(*s.ExpiresAt) {
 			m.Sandbox.Delete(ctx, sb.ID)
 			end("session expired")
 			return
