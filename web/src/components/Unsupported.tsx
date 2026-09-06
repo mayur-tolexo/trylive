@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 const EXAMPLE = `# trylive.yaml
 kind: web
@@ -18,6 +19,11 @@ export function Unsupported({ message, children }: { message?: string; children?
       </p>
       <pre className="mono snippet-block">{EXAMPLE}</pre>
       {children}
+      <div className="row">
+        <Link className="btn btn-primary" to="/">
+          Try another repo →
+        </Link>
+      </div>
     </section>
   )
 }
