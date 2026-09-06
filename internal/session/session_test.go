@@ -194,12 +194,23 @@ func TestLimitsAndErrors(t *testing.T) {
 	if _, _, err := e.m.Create(ctx, "d", "ip", "not a repo"); !errors.Is(err, repo.ErrInvalidRef) {
 		t.Errorf("invalid ref err = %v", err)
 	}
-	e.m.Create(ctx, "d1", "ip1", "octo/app")
-	if _, _, err := e.m.Create(ctx, "d1", "ip9", "octo/app"); !errors.Is(err, ErrLimited) {
-		t.Errorf("per-device limit err = %v", err)
+	first, _, _ := e.m.Create(ctx, "d1", "ip1", "octo/app")
+	waitLive(t, e, first.ID)
+	// The same device opening another session replaces the first one.
+	second, _, err := e.m.Create(ctx, "d1", "ip9", "octo/app")
+	if err != nil {
+		t.Fatalf("replace err = %v", err)
 	}
-	e.m.Create(ctx, "d2", "ip1", "octo/app")
-	if _, _, err := e.m.Create(ctx, "d3", "ip1", "octo/app"); !errors.Is(err, ErrLimited) {
+	old, _ := e.st.GetSession(ctx, first.ID)
+	if old.Status != store.SessionEnded || old.EndedReason != "replaced by a new session" {
+		t.Errorf("old session = %+v", old)
+	}
+	if d := e.f.DeletedIDs(); len(d) != 1 || d[0] != old.SandboxID {
+		t.Errorf("replaced sandbox not deleted: %v", d)
+	}
+	waitLive(t, e, second.ID)
+	e.m.Create(ctx, "d2", "ip9", "octo/app")
+	if _, _, err := e.m.Create(ctx, "d3", "ip9", "octo/app"); !errors.Is(err, ErrLimited) {
 		t.Errorf("per-ip limit err = %v", err)
 	}
 	e.m.Create(ctx, "d4", "ip4", "octo/app")

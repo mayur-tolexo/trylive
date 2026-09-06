@@ -151,6 +151,18 @@ func (m *Memory) LiveSessions(_ context.Context, device, ip string) (int, int, i
 	return byDev, byIP, total, nil
 }
 
+func (m *Memory) LiveSessionsForDevice(_ context.Context, device string) ([]Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Session
+	for _, s := range m.sessions {
+		if s.Live() && s.Device == device {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) IncrUsage(_ context.Context, day, kind, owner string, n int) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

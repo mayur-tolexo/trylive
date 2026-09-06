@@ -88,6 +88,10 @@ func runConformance(t *testing.T, s Store) {
 	if err != nil || byDev != 1 || byIP != 2 || total < 2 {
 		t.Errorf("LiveSessions = %d %d %d %v", byDev, byIP, total, err)
 	}
+	mine, err := s.LiveSessionsForDevice(ctx, dev)
+	if err != nil || len(mine) != 1 || mine[0].ID != sess.ID {
+		t.Errorf("LiveSessionsForDevice = %+v, %v", mine, err)
+	}
 	if _, err := s.GetSession(ctx, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetSession missing err = %v", err)
 	}

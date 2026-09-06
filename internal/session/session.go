@@ -113,7 +113,19 @@ func (m *Manager) Create(ctx context.Context, device, ip, repoRef string) (store
 	if total >= m.Limits.Global {
 		return store.Session{}, store.Build{}, ErrBusy
 	}
-	if byDev >= m.Limits.PerDevice || byIP >= m.Limits.PerIP {
+	// A device opening a new repo replaces its live session rather than being
+	// refused: one sandbox per person, not one visit per quarter hour.
+	if byDev >= m.Limits.PerDevice {
+		mine, err := m.Store.LiveSessionsForDevice(ctx, device)
+		if err != nil {
+			return store.Session{}, store.Build{}, err
+		}
+		for _, old := range mine {
+			m.terminate(ctx, old, "replaced by a new session")
+			byIP--
+		}
+	}
+	if byIP >= m.Limits.PerIP {
 		return store.Session{}, store.Build{}, ErrLimited
 	}
 	info, err := m.Resolver.Resolve(ctx, ref)
@@ -170,6 +182,11 @@ func (m *Manager) Subscribe(ctx context.Context, id string) (<-chan Event, error
 func (m *Manager) run(s store.Session, bld store.Build, l *fanout.Log[Event]) {
 	ctx := context.Background()
 	end := func(reason string) {
+		// terminate() may have ended the session already; keep its reason.
+		if cur, err := m.Store.GetSession(ctx, s.ID); err == nil && cur.Status == store.SessionEnded {
+			l.Finish()
+			return
+		}
 		s.Status, s.EndedReason = store.SessionEnded, reason
 		if err := m.Store.UpdateSession(ctx, &s); err != nil {
 			m.Log.Error("end session", "id", s.ID, "err", err)
@@ -309,6 +326,28 @@ func splitPhase(line string) (string, string) {
 		}
 	}
 	return "", line
+}
+
+// terminate ends a session now: the sandbox is deleted, the record marked,
+// and any listeners told. Safe to call for a session already ending.
+func (m *Manager) terminate(ctx context.Context, s store.Session, reason string) {
+	if s.SandboxID != "" {
+		if err := m.Sandbox.Delete(ctx, s.SandboxID); err != nil {
+			m.Log.Warn("delete replaced sandbox", "session", s.ID, "err", err)
+		}
+	}
+	s.Status, s.EndedReason = store.SessionEnded, reason
+	if err := m.Store.UpdateSession(ctx, &s); err != nil {
+		m.Log.Error("end session", "id", s.ID, "err", err)
+	}
+	m.mu.Lock()
+	l := m.live[s.ID]
+	delete(m.live, s.ID)
+	m.mu.Unlock()
+	if l != nil {
+		l.Emit(Event{Name: "ended", Data: EndedData{Reason: reason}})
+		l.Finish()
+	}
 }
 
 // phaseMessage is the human line for a build status.

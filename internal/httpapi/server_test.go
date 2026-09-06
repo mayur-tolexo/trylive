@@ -204,11 +204,22 @@ func TestErrorsAndLimits(t *testing.T) {
 			t.Errorf("%v: %d %v", c.body, code, out)
 		}
 	}
-	// Second live session for the same device is refused with a retry hint.
-	if code, _ := e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, dev); code != 201 {
+	// A second session from the same device replaces the first.
+	code, first := e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, dev)
+	if code != 201 {
 		t.Fatalf("first create %d", code)
 	}
-	code, out := e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, dev)
+	if code, _ := e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, dev); code != 201 {
+		t.Errorf("replace = %d", code)
+	}
+	if code, out := e.call(t, http.MethodGet, "/v1/sessions/"+first["id"].(string), nil, dev); code != 200 || out["status"] != "ended" {
+		t.Errorf("replaced session = %d %v", code, out)
+	}
+	// Other devices on the same IP hit the per-IP cap with a retry hint.
+	for i := 0; i < 5; i++ {
+		e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, "device-number-"+string(rune('a'+i)))
+	}
+	code, out := e.call(t, http.MethodPost, "/v1/sessions", map[string]string{"repo": "octo/app"}, "device-number-zz")
 	if code != 429 || out["error"].(map[string]any)["code"] != "rate_limited" || out["error"].(map[string]any)["retry_after_seconds"] == nil {
 		t.Errorf("limit = %d %v", code, out)
 	}

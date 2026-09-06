@@ -92,6 +92,8 @@ type Store interface {
 	GetSession(ctx context.Context, id string) (Session, error)
 	// LiveSessions counts sessions not yet ended for a device, for an IP, and overall.
 	LiveSessions(ctx context.Context, device, ip string) (byDevice, byIP, total int, err error)
+	// LiveSessionsForDevice lists the device's sessions that have not ended.
+	LiveSessionsForDevice(ctx context.Context, device string) ([]Session, error)
 
 	// IncrUsage adds n to the (day, kind, owner) counter and returns the total.
 	IncrUsage(ctx context.Context, day, kind, owner string, n int) (int, error)

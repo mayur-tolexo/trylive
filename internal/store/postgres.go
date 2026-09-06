@@ -226,6 +226,23 @@ func (p *Postgres) LiveSessions(ctx context.Context, device, ip string) (int, in
 	return byDev, byIP, total, err
 }
 
+func (p *Postgres) LiveSessionsForDevice(ctx context.Context, device string) ([]Session, error) {
+	rows, err := p.pool.Query(ctx, `SELECT `+sessionColumns+` FROM sessions WHERE device = $1 AND status <> 'ended'`, device)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Session
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.ID, &s.BuildID, &s.Device, &s.IP, &s.SandboxID, &s.PreviewURL, &s.Status, &s.TerminalReady, &s.Extended, &s.CreatedAt, &s.ExpiresAt, &s.EndedReason); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) IncrUsage(ctx context.Context, day, kind, owner string, n int) (int, error) {
 	var total int
 	err := p.pool.QueryRow(ctx, `INSERT INTO usage_daily (day, kind, owner, count) VALUES ($1, $2, $3, $4)
