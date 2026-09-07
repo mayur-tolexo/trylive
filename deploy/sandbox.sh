@@ -1,8 +1,10 @@
 #!/usr/bin/env sh
 # Deploys trylive into a NeevCloud sandbox: builds the web app and a static
 # linux/amd64 binary, creates a long-lived sandbox with internet egress,
-# uploads the binary, starts it with the secrets as process environment (never
-# written to disk), exposes port 8080, and prints the public preview URL.
+# uploads the binary, starts a restart loop detached from the platform's
+# process supervisor (which kills its own process groups after an hour), with
+# the secrets as process environment only, exposes port 8080, and prints the
+# public preview URL. The server keeps its sandbox alive with keepalives.
 #
 # Reads NEEV_API_KEY, NEEV_ORG_ID, NEEV_PROJECT_ID (required) and NEEV_API_BASE,
 # NEEV_REGION, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, GITHUB_TOKEN,
@@ -50,21 +52,26 @@ done
 [ "$PHASE" = "Ready" ] || { echo "sandbox not ready: $PHASE" >&2; exit 1; }
 
 echo "uploading binary"
-curl -sf -o /dev/null -X POST "$CONNECT/v1/files/write?path=trylive" -H "X-Api-Key: $NEEV_API_KEY" -H "X-Protocol-Version: 1" \
+curl -sf -o /dev/null -X POST "$CONNECT/v1/files/write?path=trylive.upload" -H "X-Api-Key: $NEEV_API_KEY" -H "X-Protocol-Version: 1" \
   -H 'Content-Type: application/octet-stream' --data-binary "@$ROOT/bin/trylive-linux-amd64"
+curl -sf -o /dev/null -X POST "$CONNECT/v1/exec" -H "X-Api-Key: $NEEV_API_KEY" -H "X-Protocol-Version: 1" -H 'Content-Type: application/json' -H 'Accept: application/x-ndjson' \
+  -d '{"command":"sh","args":["-c","chmod +x trylive.upload && mv trylive.upload trylive"],"timeout_ms":10000}'
 
 # Env is passed to the process only; nothing secret lands on the sandbox disk.
-ENV_JSON=$(python3 - <<'EOF'
+# SELF_SANDBOX_ID lets the server send keepalives for its own sandbox.
+ENV_JSON=$(SELF_SANDBOX_ID="$ID" python3 - <<'EOF2'
 import json, os
-keys = ["NEEV_API_KEY","NEEV_ORG_ID","NEEV_PROJECT_ID","NEEV_API_BASE","NEEV_REGION","LLM_BASE_URL","LLM_API_KEY","LLM_MODEL","GITHUB_TOKEN","MAX_SESSIONS_PER_IP","MAX_LIVE_SESSIONS","BUILD_CONCURRENCY"]
+keys = ["NEEV_API_KEY","NEEV_ORG_ID","NEEV_PROJECT_ID","NEEV_API_BASE","NEEV_REGION","LLM_BASE_URL","LLM_API_KEY","LLM_MODEL","GITHUB_TOKEN","MAX_SESSIONS_PER_IP","MAX_LIVE_SESSIONS","BUILD_CONCURRENCY","SELF_SANDBOX_ID"]
 env = [f"{k}={os.environ[k]}" for k in keys if os.environ.get(k)]
 env.append("ADDR=:8080")
 print(json.dumps(env))
-EOF
+EOF2
 )
+# setsid puts the restart loop in its own session so the supervisor's hourly
+# SIGKILL of the launcher's process group cannot reach the server.
 echo "starting server"
 curl -sf -o /dev/null -X POST "$CONNECT/v1/processes/start" -H "X-Api-Key: $NEEV_API_KEY" -H "X-Protocol-Version: 1" -H 'Content-Type: application/json' \
-  -d '{"program":"sh","args":["-c","chmod +x trylive; while true; do ./trylive; echo restarting; sleep 2; done"],"env":'"$ENV_JSON"'}'
+  -d '{"program":"sh","args":["-c","setsid sh -c \"while true; do ./trylive; echo restarting; sleep 2; done\" > /workspace/trylive.log 2>&1 < /dev/null & sleep 1"],"env":'"$ENV_JSON"'}'
 
 echo "exposing port 8080"
 URL=$(curl -sf -X POST "$BASE/sandboxes/$ID/ports" -H "$AUTH" -H 'Content-Type: application/json' -d '{"port":8080}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["preview_url"])')

@@ -79,6 +79,26 @@ func run(log *slog.Logger) error {
 		log.Warn("web/dist not built; serving API only")
 	}
 
+	// When running inside a platform sandbox, keep that sandbox from being
+	// idle-paused: preview traffic is not data-plane activity in the platform's
+	// eyes, so the server vouches for itself.
+	if self := os.Getenv("SELF_SANDBOX_ID"); self != "" {
+		go func() {
+			t := time.NewTicker(5 * time.Minute)
+			defer t.Stop()
+			for {
+				if err := sb.Keepalive(ctx, self); err != nil {
+					log.Warn("self keepalive", "err", err)
+				}
+				select {
+				case <-t.C:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
 	addr := envOr("ADDR", ":8080")
 	hs := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
